@@ -1,2 +1,0 @@
-# magnesite
-magnesita investing
