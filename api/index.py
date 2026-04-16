@@ -34,7 +34,7 @@ class handler(BaseHTTPRequestHandler):
             }
             
             # Pausa aleatoria para no ser detectado
-            time.sleep(random.uniform(1.0, 2.5))
+            time.sleep(random.uniform(1.5, 3.0))
             
             res = scraper.get(url, headers=headers, timeout=20)
             
