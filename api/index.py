@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler
 import cloudscraper
 from bs4 import BeautifulSoup
 
-# Variable global para el Timer
+# Cache global para proteger la IP y evitar bloqueos por repetición
 cache_rhi = {
     "precio": None,
     "timestamp": 0
@@ -15,81 +15,93 @@ cache_rhi = {
 class handler(BaseHTTPRequestHandler):
 
     def obtener_precio_rhi(self, url):
-        # 1. Configuramos el scraper
+        # 1. Configuramos el scraper con el delay alto que nos funcionó
         scraper = cloudscraper.create_scraper(
-            delay=15, # Aumentamos el delay inicial de cloudscraper
+            delay=20, 
             browser={
                 'browser': 'chrome',
                 'platform': 'windows',
-                'mobile': False
+                'desktop': True
             }
         )
         
         try:
-            # Headers más realistas: simula que vienes de Google España
+            # 2. Headers de camuflaje total (los que saltan el 403)
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-                'Referer': 'https://www.google.es/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/',
                 'Sec-Fetch-Dest': 'document',
                 'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'cross-site',
-                'Pragma': 'no-cache',
-                'Cache-Control': 'no-cache',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+                'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                'sec-ch-ua-platform': '"Windows"',
+                'Cookie': 'edition_redirect=1; gtm_id=GTM-PG97WS; _ga=GA1.2.123456789.123456789;'
             }
             
-            # --- CAMBIO DE SLEEP ---
-            # Pausa mucho más larga y errática (entre 3 y 7 segundos)
-            # Esto ayuda a "enfriar" la IP antes de pedir el dato
-            tiempo_espera = random.uniform(3.5, 7.2)
-            print(f"Esperando {tiempo_espera:.2f} segundos para evitar detección...")
-            time.sleep(tiempo_espera)
+            # --- PAUSA HUMANA ---
+            pausa = random.uniform(6.0, 11.0)
+            print(f"Iniciando pausa de {pausa:.2f}s para RHI...")
+            time.sleep(pausa)
             
-            res = scraper.get(url, headers=headers, timeout=30)
+            res = scraper.get(url, headers=headers, timeout=40)
             
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
                 
-                # Intentamos los selectores conocidos
+                # Selectores que me pasaste para Magnesita
                 tag = soup.find("div", {"data-test": "instrument-price-last"}) or \
                       soup.select_one('span[data-test="instrument-price-last"]') or \
                       soup.find("span", {"id": "last_last"})
                 
                 if tag:
-                    valor = tag.get_text(strip=True)
-                    print(f"ÉXITO: Valor capturado -> {valor}")
-                    return valor
+                    # --- LÓGICA DE FORMATO: COMA EN ÚLTIMOS 2 DÍGITOS ---
+                    # Limpiamos comas o puntos que traiga la web
+                    valor_sucio = tag.get_text(strip=True).replace(',', '')
+                    
+                    try:
+                        numero = float(valor_sucio)
+                        # Forzamos 2 decimales y ponemos la coma
+                        valor_final = "{:.2f}".format(numero).replace('.', ',')
+                        print(f"VALOR RHI CAPTURADO: {valor_final}")
+                        return valor_final
+                    except:
+                        return valor_sucio
                 
                 return "Tag_No_Encontrado"
             
-            print(f"BLOQUEO DETECTADO: Código {res.status_code}")
+            print(f"BLOQUEO RHI: Status {res.status_code}")
             return f"Error_{res.status_code}"
             
         except Exception as e:
-            print(f"ERROR EN PETICIÓN: {str(e)}")
             return "Error_Excepcion"
 
     def do_GET(self):
         global cache_rhi
         
+        # Link de Magnesita (RHI)
         url_rhi = "https://es.investing.com/equities/rhi-ag"
         ahora = time.time()
         TIEMPO_CACHE = 7200 # 2 horas
 
+        # Lógica del Timer
         if cache_rhi["precio"] and (ahora - cache_rhi["timestamp"] < TIEMPO_CACHE):
             valor_final = cache_rhi["precio"]
-            fuente = "Caché (Ahorro créditos/IP)"
+            fuente = "Caché"
         else:
             valor_final = self.obtener_precio_rhi(url_rhi)
             
-            if "Error" not in valor_final and valor_final != "No_Encontrado":
+            if "Error" not in valor_final and valor_final != "Tag_No_Encontrado":
                 cache_rhi["precio"] = valor_final
                 cache_rhi["timestamp"] = ahora
-                fuente = "Investing Real-time"
+                fuente = "Investing Actualizado"
             else:
-                fuente = "Bloqueado por Investing"
+                fuente = "Error / Bloqueo"
 
+        # Respuesta final del JSON
         datos = {
             "empresa": "RHI Magnesita",
             "precio": valor_final,
