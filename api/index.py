@@ -1,10 +1,11 @@
 import json
 import time
+import random
 from http.server import BaseHTTPRequestHandler
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 
-# Cache global para cuidar tus 5,000 créditos gratis mensuales
+# Cache global para proteger tu IP y espaciar las consultas
 cache_rhi = {
     "precio": None,
     "timestamp": 0
@@ -13,40 +14,86 @@ cache_rhi = {
 class handler(BaseHTTPRequestHandler):
 
     def obtener_precio_rhi(self, url):
-        # 1. PEGA AQUÍ TU API KEY DE SCRAPERAPI
-        SCRAPERAPI_KEY = "TU_API_KEY_AQUI"
-        
-        # Construimos la URL de la API con los parámetros para romper el bloqueo
-        # 'render=true' le dice a ScraperAPI que procese el JavaScript de Cloudflare
-        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url={url}&render=true"
+        # Inicializamos cloudscraper simulando una versión exacta de Chrome en Windows
+        scraper = cloudscraper.create_scraper(
+            delay=15, 
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
+            }
+        )
         
         try:
-            print("Enviando petición a través de ScraperAPI...")
-            # Ya no necesitas cloudscraper ni headers raros, la API se encarga de todo
-            res = requests.get(proxy_url, timeout=60)
+            # 1. Lista de User-Agents reales y actualizados
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0'
+            ]
+            
+            ua_elegido = random.choice(user_agents)
+            
+            # 2. Configuración de Headers de "Navegador Seguro"
+            headers = {
+                'User-Agent': ua_elegido,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+                'sec-ch-ua': '"Chromium";v="125", "Google Chrome";v="125", "Not-A.Brand";v="99"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
+                'Referer': 'https://www.google.com/'
+            }
+
+            # --- PASO DE CAMUFLAJE PREVIO ---
+            # Primero visitamos Google para obtener cookies legítimas de sesión corporativa
+            try:
+                print("Simulando navegación previa en buscador...")
+                scraper.get("https://www.google.com", headers={'User-Agent': ua_elegido}, timeout=15)
+                # Pausa caótica antes de ir por el objetivo real
+                time.sleep(random.uniform(3.2, 6.7))
+            except:
+                pass # Si Google falla, continuamos de todos modos
+
+            # --- TIMERS CAÓTICOS (JITTER) ---
+            # Hacemos una serie de pausas impredecibles para romper patrones de bots
+            for _ in range(random.randint(2, 4)):
+                time.sleep(random.uniform(2.5, 4.5))
+            
+            print(f"Lanzando petición camuflada a Investing...")
+            res = scraper.get(url, headers=headers, timeout=35)
             
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
                 
-                # Usamos los mismos selectores de Investing
+                # Buscamos en la estructura del HTML
                 tag = soup.find("div", {"data-test": "instrument-price-last"}) or \
                       soup.select_one('span[data-test="instrument-price-last"]') or \
                       soup.find("span", {"id": "last_last"})
                 
                 if tag:
-                    # Lógica limpia para cambiar el punto por la coma sin meter decimales extras
+                    # LÓGICA DE PRECIO SIMPLE (Sin .00 automáticos)
+                    # Quitamos comas viejas y cambiamos el punto decimal por la coma del Scrap
                     valor_original = tag.get_text(strip=True).replace(',', '')
                     valor_final = valor_original.replace('.', ',')
-                    print(f"¡LOGRADO CON PROXY!: {valor_final}")
+                    
+                    print(f"VALOR CONSEGUIDO: {valor_final}")
                     return valor_final
                 
                 return "Tag_No_Encontrado"
             
-            print(f"Error en ScraperAPI: Status {res.status_code}")
+            print(f"BLOQUEO CLOUDSHARE: Código {res.status_code}")
             return f"Error_{res.status_code}"
             
         except Exception as e:
-            print(f"Excepción: {str(e)}")
+            print(f"Excepción interna: {str(e)}")
             return "Error_Excepcion"
 
     def do_GET(self):
@@ -54,21 +101,20 @@ class handler(BaseHTTPRequestHandler):
         
         url_rhi = "https://es.investing.com/equities/rhi-ag"
         ahora = time.time()
-        # Mantenemos las 2 horas de caché para que solo gaste 12 créditos al día
-        TIEMPO_CACHE = 7200 
+        TIEMPO_CACHE = 7200 # Conservamos las 2 horas para proteger la IP del servidor
 
         if cache_rhi["precio"] and (ahora - cache_rhi["timestamp"] < TIEMPO_CACHE):
             valor_final = cache_rhi["precio"]
-            fuente = "Caché interna (Crédito ahorrado)"
+            fuente = "Caché Local"
         else:
             valor_final = self.obtener_precio_rhi(url_rhi)
             
             if "Error" not in valor_final and valor_final != "Tag_No_Encontrado":
                 cache_rhi["precio"] = valor_final
                 cache_rhi["timestamp"] = ahora
-                fuente = "Investing via ScraperAPI (Actualizado)"
+                fuente = "Investing Original (Actualizado)"
             else:
-                fuente = "Error en la API de Proxy"
+                fuente = "Modo de Espera por Bloqueo"
 
         datos = {
             "empresa": "RHI Magnesita",
