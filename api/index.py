@@ -14,7 +14,7 @@ cache_rhi = {
 class handler(BaseHTTPRequestHandler):
 
     def intentar_scrape(self, materiales):
-        # Lista de configuraciones para rotar identidad (idéntica a la tuya)
+        # Lista de configuraciones para rotar identidad
         user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -29,7 +29,6 @@ class handler(BaseHTTPRequestHandler):
         resultados = {}
         
         for metal in materiales:
-            # Delay entre peticiones idéntico
             time.sleep(random.uniform(2.0, 3.0))
             
             headers = {
@@ -45,17 +44,17 @@ class handler(BaseHTTPRequestHandler):
                 if res.status_code == 200:
                     soup = BeautifulSoup(res.text, 'html.parser')
                     
-                    # --- CONFIGURACIÓN DEL SELECTOR DETECTADO ---
-                    # Buscamos por el atributo data-test o la clase específica del div que me pasaste
                     elemento = soup.find(attrs={"data-test": "instrument-price-last"}) or \
                                soup.select_one('div[data-test="instrument-price-last"]') or \
                                soup.select_one('.text-5xl\/9')
                     
                     if elemento:
-                        # Extraemos el texto limpio (Trae "33,900" o similar)
-                        # Cambiamos puntos por comas solo si trae formato con punto, si ya trae coma lo deja intacto.
-                        valor_original = elemento.text.strip()
-                        resultados[metal["id"]] = valor_original
+                        # --- NUEVA LÓGICA DE LIMPIEZA TOTAL ---
+                        # Eliminamos primero las comas y luego los puntos por completo
+                        valor_crudo = elemento.text.strip()
+                        valor_numerico_puro = valor_crudo.replace(',', '').replace('.', '')
+                        
+                        resultados[metal["id"]] = valor_numerico_puro
                     else:
                         resultados[metal["id"]] = "No encontrado"
                 else:
@@ -68,7 +67,6 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         global cache_rhi
         
-        # Cambiamos la configuración de LME por el enlace de RHI Magnesita
         materiales_config = [
             {"id": "magnesita", "url": "https://es.investing.com/equities/rhi-ag"}
         ]
@@ -76,7 +74,6 @@ class handler(BaseHTTPRequestHandler):
         ahora = time.time()
         TIEMPO_CACHE = 1800  # 30 minutos
         
-        # Lógica de Cache idéntica
         if cache_rhi["datos"] and (ahora - cache_rhi["timestamp"] < TIEMPO_CACHE):
             final_data = cache_rhi["datos"]
             fuente = "cache"
