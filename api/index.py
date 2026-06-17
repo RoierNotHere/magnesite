@@ -15,9 +15,8 @@ cache_rhi = {
 class handler(BaseHTTPRequestHandler):
 
     def obtener_precio_rhi(self, url):
-        # Subimos el delay inicial de cloudscraper para que negocie el JavaScript más lento
         scraper = cloudscraper.create_scraper(
-            delay=30, 
+            delay=25, 
             browser={
                 'browser': 'chrome',
                 'platform': 'windows',
@@ -26,32 +25,31 @@ class handler(BaseHTTPRequestHandler):
         )
         
         try:
-            # Headers ultra-modernos imitando Chrome 126 con procedencia de red social
+            # Headers alternativos simulando una petición limpia de red social
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br, zstd', # Añadimos zstd que lo usan los Chrome nuevos
-                'Referer': 'https://www.linkedin.com/', # Cambiamos el origen a LinkedIn
-                'DNT': '1',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://www.facebook.com/', # Probamos ahora con origen Facebook
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
                 'Sec-Fetch-Dest': 'document',
                 'Sec-Fetch-Mode': 'navigate',
                 'Sec-Fetch-Site': 'cross-site',
-                'Sec-Fetch-User': '?1',
-                'sec-ch-ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"',
-                'Priority': 'u=0, i' # Header de prioridad nuevo en Chrome
+                'sec-ch-ua': '"Chromium";v="125", "Google Chrome";v="125"',
+                'sec-ch-ua-platform': '"Windows"'
             }
             
-            # Pausa humana más larga e impredecible
-            pausa = random.uniform(10.1, 16.4)
-            print(f"Pausando {pausa:.2f}s con estrategia LinkedIn...")
-            time.sleep(pausa)
+            # --- NUEVA LÓGICA DE DELAY ULTRA-RANDOM (JITTER) ---
+            # En vez de una sola pausa, hace entre 3 y 6 micro-pausas aleatorias
+            ciclos_pausa = random.randint(3, 6)
+            print(f"Iniciando {ciclos_pausa} micro-pausas de camuflaje...")
+            for i in range(ciclos_pausa):
+                micro_tiempo = random.uniform(2.1, 4.8)
+                time.sleep(micro_tiempo)
             
-            res = scraper.get(url, headers=headers, timeout=50)
+            res = scraper.get(url, headers=headers, timeout=45)
             
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
@@ -63,12 +61,12 @@ class handler(BaseHTTPRequestHandler):
                 if tag:
                     valor_original = tag.get_text(strip=True).replace(',', '')
                     valor_final = valor_original.replace('.', ',')
-                    print(f"¡LOGRADO!: {valor_final}")
+                    print(f"¡Éxito en el scrap!: {valor_final}")
                     return valor_final
                 
                 return "Tag_No_Encontrado"
             
-            print(f"FALLO: Status {res.status_code}")
+            print(f"BLOQUEO ACTUAL: Status {res.status_code}")
             return f"Error_{res.status_code}"
             
         except Exception as e:
