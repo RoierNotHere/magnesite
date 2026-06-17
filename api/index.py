@@ -1,104 +1,101 @@
-import json
-import time
-import random
 from http.server import BaseHTTPRequestHandler
-import urllib3
+import cloudscraper
 from bs4 import BeautifulSoup
+import json
+import random
+import time
 
+# Cache global adaptada para RHI Magnesita
 cache_rhi = {
-    "precio": None,
+    "datos": {},
     "timestamp": 0
 }
 
 class handler(BaseHTTPRequestHandler):
 
-    def probar_medio_alternativo(self, url):
-        # Clonamos el User-Agent exacto de un iPhone moderno con Safari
-        ua_ios = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+    def intentar_scrape(self, materiales):
+        # Lista de configuraciones para rotar identidad (idéntica a la tuya)
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+        ]
+
+        scraper = cloudscraper.create_scraper(
+            delay=10,
+            browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
+        )
         
-        # Estructura de cabeceras nativas de iOS (Safari no usa sec-ch-ua, lo que nos simplifica el camuflaje)
-        headers = {
-            'User-Agent': ua_ios,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'es-cl,es;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': 'https://t.co/', # Simula que abrieron el link desde la app de Twitter/X
-            'Connection': 'keep-alive',
+        resultados = {}
+        
+        for metal in materiales:
+            # Delay entre peticiones idéntico
+            time.sleep(random.uniform(2.0, 3.0))
             
-            # Metadata de navegación para Safari Móvil
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'cross-site',
-            
-            'X-Requested-With': 'com.apple.mobilesafari'
-        }
+            headers = {
+                'User-Agent': random.choice(user_agents),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9',
+                'Referer': 'https://www.google.com/',
+                'Sec-Fetch-Mode': 'navigate'
+            }
 
-        # Una pausa un poco más corta pero muy aleatoria, típica de red móvil
-        time.sleep(random.uniform(3.5, 7.2))
-
-        try:
-            print("[Prueba] Intentando camuflaje de iPhone/Safari...")
-            # Forzamos un PoolManager estándar
-            http = urllib3.PoolManager(cert_reqs='CERT_NONE')
-            
-            res = http.request('GET', url, headers=headers, timeout=30.0)
-            print(f"[Resultado] HTTP Status: {res.status}")
-
-            if res.status == 200:
-                html_content = res.data.decode('utf-8', errors='ignore')
-                soup = BeautifulSoup(html_content, "html.parser")
-                
-                # El selector exacto que extrajiste
-                tag = soup.find(attrs={"data-test": "instrument-price-last"}) or \
-                      soup.select_one('div[data-test="instrument-price-last"]') or \
-                      soup.select_one('.text-5xl\/9')
-                
-                if tag:
-                    valor_original = tag.get_text(strip=True)
-                    print(f"[Éxito] Encontrado con perfil móvil: {valor_original}")
-                    return f"Exito_{valor_original}"
-                
-                return "Error_Tag_No_Encontrado"
-                
-            return f"Error_{res.status}"
-
-        except Exception as e:
-            return f"Error_Excepcion_{str(e)[:40]}"
+            try:
+                res = scraper.get(metal["url"], headers=headers, timeout=15)
+                if res.status_code == 200:
+                    soup = BeautifulSoup(res.text, 'html.parser')
+                    
+                    # --- CONFIGURACIÓN DEL SELECTOR DETECTADO ---
+                    # Buscamos por el atributo data-test o la clase específica del div que me pasaste
+                    elemento = soup.find(attrs={"data-test": "instrument-price-last"}) or \
+                               soup.select_one('div[data-test="instrument-price-last"]') or \
+                               soup.select_one('.text-5xl\/9')
+                    
+                    if elemento:
+                        # Extraemos el texto limpio (Trae "33,900" o similar)
+                        # Cambiamos puntos por comas solo si trae formato con punto, si ya trae coma lo deja intacto.
+                        valor_original = elemento.text.strip()
+                        resultados[metal["id"]] = valor_original
+                    else:
+                        resultados[metal["id"]] = "No encontrado"
+                else:
+                    resultados[metal["id"]] = f"Error {res.status_code}"
+            except Exception as e:
+                resultados[metal["id"]] = f"Error: {str(e)}"
+        
+        return resultados
 
     def do_GET(self):
         global cache_rhi
         
-        url_rhi = "https://es.investing.com/equities/rhi-ag"
+        # Cambiamos la configuración de LME por el enlace de RHI Magnesita
+        materiales_config = [
+            {"id": "magnesita", "url": "https://es.investing.com/equities/rhi-ag"}
+        ]
+        
         ahora = time.time()
-        TIEMPO_CACHE = 45 
-
-        if cache_rhi["precio"] and (ahora - cache_rhi["timestamp"] < TIEMPO_CACHE):
-            valor_final = cache_rhi["precio"]
-            fuente = "Caché móvil"
-            status_api = "online"
+        TIEMPO_CACHE = 1800  # 30 minutos
+        
+        # Lógica de Cache idéntica
+        if cache_rhi["datos"] and (ahora - cache_rhi["timestamp"] < TIEMPO_CACHE):
+            final_data = cache_rhi["datos"]
+            fuente = "cache"
         else:
-            resultado_test = self.probar_medio_alternativo(url_rhi)
-            
-            if resultado_test.startswith("Exito_"):
-                valor_final = resultado_test.split("_")[1]
-                cache_rhi["precio"] = valor_final
-                cache_rhi["timestamp"] = ahora
-                fuente = "Investing via urllib3 (Perfil iOS)"
-                status_api = "online"
-            else:
-                valor_final = resultado_test
-                fuente = "Fallo en perfil móvil"
-                status_api = "blocked"
-
-        datos = {
-            "empresa": "RHI Magnesita",
-            "precio": valor_final,
-            "fuente": fuente,
-            "status": status_api
-        }
+            final_data = self.intentar_scrape(materiales_config)
+            cache_rhi["datos"] = final_data
+            cache_rhi["timestamp"] = ahora
+            fuente = "real-time"
 
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(json.dumps(datos).encode('utf-8'))
+        
+        res_json = {
+            "rhi_data": final_data,
+            "status": "online",
+            "fuente": fuente,
+            "timestamp": int(ahora)
+        }
+        
+        self.wfile.write(json.dumps(res_json).encode('utf-8'))
