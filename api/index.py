@@ -5,7 +5,6 @@ from http.server import BaseHTTPRequestHandler
 import urllib3
 from bs4 import BeautifulSoup
 
-# Cache global temporal corta para pruebas rápidas
 cache_rhi = {
     "precio": None,
     "timestamp": 0
@@ -14,44 +13,49 @@ cache_rhi = {
 class handler(BaseHTTPRequestHandler):
 
     def probar_medio_alternativo(self, url):
-        # Lista local fija para evitar que se caiga el servidor por dependencias externas
-        user_agents_locales = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0'
-        ]
+        # Fijamos un único User-Agent ultra detallado para que coincida con los metadatos de abajo
+        ua_exacto = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
         
+        # Cabeceras optimizadas con las firmas obligatorias de Cloudflare (Sec-Fetch y sec-ch-ua)
         headers = {
-            'User-Agent': random.choice(user_agents_locales),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8',
+            'User-Agent': ua_exacto,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
             'Referer': 'https://www.google.com/',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            
+            # --- FIRMAS METADATA REALES DE CHROME 125 ---
             'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'cross-site'
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-User': '?1',
+            'sec-ch-ua': '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-ch-ua-platform-version': '"10.0.0"',
+            
+            'Cache-Control': 'max-age=0',
+            'DNT': '1'
         }
 
-        # Pequeña pausa aleatoria antes de conectar
-        time.sleep(random.uniform(3.0, 6.0))
+        # Aplicamos una pausa humana antes de lanzar la conexión
+        time.sleep(random.uniform(4.5, 8.5))
 
         try:
-            print("[Prueba] Conectando mediante PoolManager de urllib3...")
-            # Creamos un gestor de conexiones limpio sin rastro de librerías comunes de bots
-            http = urllib3.PoolManager(cert_reqs='CERT_NONE') # Evita problemas raros de SSL corporativos
+            print("[Prueba] Conectando con cabeceras Sec-Ch-Ua avanzadas...")
+            # Mantenemos el PoolManager limpio
+            http = urllib3.PoolManager(cert_reqs='CERT_NONE')
             
-            res = http.request('GET', url, headers=headers, timeout=25.0)
+            res = http.request('GET', url, headers=headers, timeout=30.0)
             print(f"[Resultado] HTTP Status: {res.status}")
 
             if res.status == 200:
-                # Decodificamos la respuesta HTML
                 html_content = res.data.decode('utf-8', errors='ignore')
                 soup = BeautifulSoup(html_content, "html.parser")
                 
-                # Buscamos exactamente con el selector que me diste
+                # El selector que encontraste
                 tag = soup.find(attrs={"data-test": "instrument-price-last"}) or \
                       soup.select_one('div[data-test="instrument-price-last"]') or \
                       soup.select_one('.text-5xl\/9')
@@ -66,7 +70,6 @@ class handler(BaseHTTPRequestHandler):
             return f"Error_{res.status}"
 
         except Exception as e:
-            # Captura el error exacto para mostrarlo en el JSON si algo vuelve a fallar
             return f"Error_Excepcion_{str(e)[:40]}"
 
     def do_GET(self):
@@ -74,7 +77,7 @@ class handler(BaseHTTPRequestHandler):
         
         url_rhi = "https://es.investing.com/equities/rhi-ag"
         ahora = time.time()
-        TIEMPO_CACHE = 45 # 45 segundos para pruebas fluidas
+        TIEMPO_CACHE = 45 
 
         if cache_rhi["precio"] and (ahora - cache_rhi["timestamp"] < TIEMPO_CACHE):
             valor_final = cache_rhi["precio"]
@@ -87,11 +90,11 @@ class handler(BaseHTTPRequestHandler):
                 valor_final = resultado_test.split("_")[1]
                 cache_rhi["precio"] = valor_final
                 cache_rhi["timestamp"] = ahora
-                fuente = "Investing via urllib3"
+                fuente = "Investing via urllib3 (Headers Chrome 125)"
                 status_api = "online"
             else:
-                valor_final = resultado_test  # Muestra el código de error en el campo precio
-                fuente = "Fallo en el nuevo medio"
+                valor_final = resultado_test
+                fuente = "Fallo en las cabeceras"
                 status_api = "blocked"
 
         datos = {
