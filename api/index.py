@@ -1,11 +1,12 @@
 import json
 import time
 import random
+import requests
 from http.server import BaseHTTPRequestHandler
 import cloudscraper
 from bs4 import BeautifulSoup
 
-# Caché simplificada solo para el valor en USD
+# Caché rápida en memoria
 cache_investing = {"magnesio_usd": None, "timestamp": 0}
 
 class handler(BaseHTTPRequestHandler):
@@ -21,7 +22,7 @@ class handler(BaseHTTPRequestHandler):
         )
 
     def parsear_numero(self, texto_raw):
-        """ Extrae el valor numérico sin importar si viene en formato europeo o anglosajón """
+        """ Convierte string de precio a float manejando formatos europeos o anglosajones """
         limpio = ''.join(c for c in texto_raw if c.isdigit() or c in ['.', ','])
         if not limpio:
             return None
@@ -36,7 +37,7 @@ class handler(BaseHTTPRequestHandler):
 
         return float(limpio)
 
-    def obtener_precio(self, url, scraper):
+    def obtener_precio_magnesio(self, url, scraper):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -45,8 +46,8 @@ class handler(BaseHTTPRequestHandler):
         }
 
         try:
-            time.sleep(random.uniform(3.5, 6.0))
-            res = scraper.get(url, headers=headers, timeout=40)
+            time.sleep(random.uniform(3.0, 5.0))
+            res = scraper.get(url, headers=headers, timeout=30)
 
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
@@ -60,12 +61,20 @@ class handler(BaseHTTPRequestHandler):
         except Exception:
             return None
 
-    def obtener_tasa_usdcny(self, scraper):
-        url_usd_cny = "https://es.investing.com/currencies/usd-cny"
-        res = self.obtener_precio(url_usd_cny, scraper)
-        if isinstance(res, (int, float)) and res > 0:
-            return res
-        return 7.20 # Respaldo por si falla el scraping de la divisa
+    def obtener_tasa_usd_cny(self):
+        """ Consulta el tipo de cambio oficial mediante API rápida o usa valor de reserva """
+        try:
+            # API gratuita para tipo de cambio en tiempo real (USD -> CNY)
+            url_api = "https://open.er-api.com/v6/latest/USD"
+            response = requests.get(url_api, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                rate = data.get("rates", {}).get("CNY")
+                if rate and rate > 0:
+                    return rate
+        except Exception:
+            pass
+        return 7.20 # Valor de reserva si la red falla
 
     def do_GET(self):
         global cache_investing
@@ -78,10 +87,10 @@ class handler(BaseHTTPRequestHandler):
             valor_usd = cache_investing["magnesio_usd"]
         else:
             scraper = self.crear_scraper()
-            precio_cny = self.obtener_precio(magnesio_url, scraper)
+            precio_cny = self.obtener_precio_magnesio(magnesio_url, scraper)
 
             if isinstance(precio_cny, (int, float)):
-                tasa_usdcny = self.obtener_tasa_usdcny(scraper)
+                tasa_usdcny = self.obtener_tasa_usd_cny()
                 valor_usd = round(precio_cny / tasa_usdcny, 2)
 
                 cache_investing["magnesio_usd"] = valor_usd
@@ -89,7 +98,7 @@ class handler(BaseHTTPRequestHandler):
             else:
                 valor_usd = None
 
-        # Devuelve directamente el valor o null si falló
+        # Devuelve solo la estructura JSON limpia con el valor numérico
         datos = {"precio_usd": valor_usd}
 
         self.send_response(200)
