@@ -1,98 +1,99 @@
+import json
+import time
+import random
 from http.server import BaseHTTPRequestHandler
 import cloudscraper
 from bs4 import BeautifulSoup
-import json
-import random
-import time
 
-# Cache global adaptada para RHI Magnesita
-cache_rhi = {
-    "datos": {},
-    "timestamp": 0
-}
+# Caché simplificada solo para el valor en USD
+cache_investing = {"magnesio_usd": None, "timestamp": 0}
 
 class handler(BaseHTTPRequestHandler):
 
-    def intentar_scrape(self, materiales):
-        # Lista de configuraciones para rotar identidad
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-        ]
-
-        scraper = cloudscraper.create_scraper(
-            delay=10,
-            browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-        )
-        
-        resultados = {}
-        
-        for metal in materiales:
-            time.sleep(random.uniform(2.0, 3.0))
-            
-            headers = {
-                'User-Agent': random.choice(user_agents),
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'es-ES,es;q=0.9',
-                'Referer': 'https://www.google.com/',
-                'Sec-Fetch-Mode': 'navigate'
+    def crear_scraper(self):
+        return cloudscraper.create_scraper(
+            delay=20, 
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
             }
+        )
 
-            try:
-                res = scraper.get(metal["url"], headers=headers, timeout=15)
-                if res.status_code == 200:
-                    soup = BeautifulSoup(res.text, 'html.parser')
-                    
-                    elemento = soup.find(attrs={"data-test": "instrument-price-last"}) or \
-                               soup.select_one('div[data-test="instrument-price-last"]') or \
-                               soup.select_one('.text-5xl\/9')
-                    
-                    if elemento:
-                        # --- NUEVA LÓGICA DE LIMPIEZA TOTAL ---
-                        # Eliminamos primero las comas y luego los puntos por completo
-                        valor_crudo = elemento.text.strip()
-                        valor_numerico_puro = valor_crudo.replace(',', '').replace('.', '')
-                        
-                        resultados[metal["id"]] = valor_numerico_puro
-                    else:
-                        resultados[metal["id"]] = "No encontrado"
-                else:
-                    resultados[metal["id"]] = f"Error {res.status_code}"
-            except Exception as e:
-                resultados[metal["id"]] = f"Error: {str(e)}"
-        
-        return resultados
+    def parsear_numero(self, texto_raw):
+        """ Extrae el valor numérico sin importar si viene en formato europeo o anglosajón """
+        limpio = ''.join(c for c in texto_raw if c.isdigit() or c in ['.', ','])
+        if not limpio:
+            return None
+
+        if '.' in limpio and ',' in limpio:
+            if limpio.rfind(',') > limpio.rfind('.'):
+                limpio = limpio.replace('.', '').replace(',', '.')
+            else:
+                limpio = limpio.replace(',', '')
+        elif ',' in limpio:
+            limpio = limpio.replace(',', '.')
+
+        return float(limpio)
+
+    def obtener_precio(self, url, scraper):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+            'Referer': 'https://www.google.com/'
+        }
+
+        try:
+            time.sleep(random.uniform(3.5, 6.0))
+            res = scraper.get(url, headers=headers, timeout=40)
+
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                tag = soup.find(attrs={"data-test": "instrument-price-last"}) or \
+                      soup.select_one('span[data-test="instrument-price-last"]') or \
+                      soup.find("span", {"id": "last_last"})
+
+                if tag:
+                    return self.parsear_numero(tag.get_text(strip=True))
+            return None
+        except Exception:
+            return None
+
+    def obtener_tasa_usdcny(self, scraper):
+        url_usd_cny = "https://es.investing.com/currencies/usd-cny"
+        res = self.obtener_precio(url_usd_cny, scraper)
+        if isinstance(res, (int, float)) and res > 0:
+            return res
+        return 7.20 # Respaldo por si falla el scraping de la divisa
 
     def do_GET(self):
-        global cache_rhi
-        
-        materiales_config = [
-            {"id": "magnesita", "url": "https://es.investing.com/equities/rhi-ag"}
-        ]
-        
+        global cache_investing
+
+        magnesio_url = "https://es.investing.com/commodities/magnesium-99.9-min-china-futures"
         ahora = time.time()
-        TIEMPO_CACHE = 1800  # 30 minutos
-        
-        if cache_rhi["datos"] and (ahora - cache_rhi["timestamp"] < TIEMPO_CACHE):
-            final_data = cache_rhi["datos"]
-            fuente = "cache"
+        TIEMPO_CACHE = 7200  # 2 horas
+
+        if cache_investing["magnesio_usd"] and (ahora - cache_investing["timestamp"] < TIEMPO_CACHE):
+            valor_usd = cache_investing["magnesio_usd"]
         else:
-            final_data = self.intentar_scrape(materiales_config)
-            cache_rhi["datos"] = final_data
-            cache_rhi["timestamp"] = ahora
-            fuente = "real-time"
+            scraper = self.crear_scraper()
+            precio_cny = self.obtener_precio(magnesio_url, scraper)
+
+            if isinstance(precio_cny, (int, float)):
+                tasa_usdcny = self.obtener_tasa_usdcny(scraper)
+                valor_usd = round(precio_cny / tasa_usdcny, 2)
+
+                cache_investing["magnesio_usd"] = valor_usd
+                cache_investing["timestamp"] = ahora
+            else:
+                valor_usd = None
+
+        # Devuelve directamente el valor o null si falló
+        datos = {"precio_usd": valor_usd}
 
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        
-        res_json = {
-            "rhi_data": final_data,
-            "status": "online",
-            "fuente": fuente,
-            "timestamp": int(ahora)
-        }
-        
-        self.wfile.write(json.dumps(res_json).encode('utf-8'))
+        self.wfile.write(json.dumps(datos).encode('utf-8'))
